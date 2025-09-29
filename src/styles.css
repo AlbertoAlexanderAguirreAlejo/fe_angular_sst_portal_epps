@@ -1,1 +1,24 @@
 /* You can add global styles to this file, and also import other style files */
+@import "primeicons/primeicons.css";
+
+@import "tailwindcss";
+
+/* Hace que `dark:` use .dark en el árbol DOM en lugar de prefers-color-scheme */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ESTILOS PERSONALIZADOS */
+
+/* Paleta por defecto (modo claro) */
+:root {
+  --gb-stops: #ee6ef5, #57b9ff, #ee6ef5;
+  --gb-speed: 6s;
+  --gb-width: 2px;
+}
+
+/* Paleta para modo oscuro */
+.dark {
+  --gb-stops: #a512af, #106bac, #a512af;
+  /* --gb-stops: #000594, #001a9e, #4107ab, #6d04b4, #000594; */
+  --gb-speed: 6s;
+  --gb-width: 2px;
+}
