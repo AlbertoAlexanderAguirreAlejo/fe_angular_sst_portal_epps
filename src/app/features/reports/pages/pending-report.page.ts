@@ -8,7 +8,6 @@ import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import { ToolbarModule } from 'primeng/toolbar';
 
-import { ReportsApi } from '../data-access/reports.api';
 import { ReportsStore } from '../data-access/reports.store';
 
 import { SmartTableComponent, SmartTableColumn } from '@shared/ui/components/smart-table/smart-table.component';
@@ -53,17 +52,16 @@ export class PendingReportPage {
 
   // Columnas
   cols: SmartTableColumn[] = [
-    { field: 'nroDoc',              header: 'Doc.',             cellType: 'text',         minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  align: 'center' },
-    { field: 'colaborador',         header: 'Nombres',          cellType: 'text',         minWidthPx: 200, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
-    { field: 'codEquipo',           header: 'Equipo',           cellType: 'text',         minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
-    { field: 'descEquipo',          header: 'Descripción',      cellType: 'text',         minWidthPx: 220, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
-    { field: 'cantidad',            header: 'Ctd.',             cellType: 'text',         minWidthPx: 100, sortable: true,  filterable: true, filterType: 'numeric', align: 'center', },
-    { field: 'um',                  header: 'UM',               cellType: 'text',         minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect', align: 'center' },
-    { field: 'fechaEntrega',        header: 'Fecha Entrega',    cellType: 'date',         minWidthPx: 140, sortable: true,  filterable: true, filterType: 'date' }
+    { field: 'nroDoc',        header: 'Doc.',           cellType: 'text', minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  align: 'center' },
+    { field: 'colaborador',   header: 'Nombres',        cellType: 'text', minWidthPx: 200, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
+    { field: 'codEquipo',     header: 'Equipo',         cellType: 'text', minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
+    { field: 'descEquipo',    header: 'Descripción',    cellType: 'text', minWidthPx: 220, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
+    { field: 'cantidad',      header: 'Ctd.',           cellType: 'text', minWidthPx: 100, sortable: true,  filterable: true, filterType: 'numeric', align: 'center', },
+    { field: 'um',            header: 'UM',             cellType: 'text', minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect', align: 'center' },
+    { field: 'fechaEntrega',  header: 'Fecha Entrega',  cellType: 'date', minWidthPx: 140, sortable: true,  filterable: true, filterType: 'date' }
   ];
 
   // Datos
-  today = new Date();
   rows = computed(() => this.store.listaPendientes());
 
   onFilter() { this.store.loadPendientes(); }

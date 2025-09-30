@@ -52,9 +52,9 @@ export interface SmartTableColumn {
   filterUI?: 'select' | 'multiselect';
   filterPlaceholder?: string;
 
-  /** NUEVO: tipo de celda para render automático */
+  /** Tipo de celda para render automático */
   cellType?: 'text' | 'date' | 'boolean' | 'booleanTag' | 'imageBase64' | 'status';
-  /** Args opcionales por tipo (p.ej. formato de fecha) */
+  /** Args opcionales por tipo (p.ej. formato de fecha / mapeo status) */
   cellArgs?: {
     // Para cellType='date'
     dateTz?: string;
@@ -187,7 +187,7 @@ export interface SmartTableColumn {
                   label="Exportar"
                   icon="pi pi-file-excel"
                   severity="success"
-                  (click)="exportCSV(dt)"
+                  (click)="exportXLSX(dt)"
                   [disabled]="!canExport(dt)"
                 />
               }
@@ -411,11 +411,12 @@ export class SmartTableComponent implements OnChanges, AfterViewInit {
   // Búsqueda global
   @Input() globalFilterFields: string[] = [];
 
-  // Export CSV (nativo PrimeNG + custom exclude)
+  // Export (XLSX)
   @Input() exportEnabled = true;
   @Input() exportFilename = 'export';
-  @Input() csvSeparator = ',';
-  /** Campos (field) a excluir SOLO para CSV */
+  @Input() csvSeparator = ','; // compat
+
+  /** 🔙 Restaurado: campos a excluir en exportación */
   @Input() exportExclude: string[] = [];
 
   /** Exportación PDF opcional */
@@ -581,31 +582,28 @@ export class SmartTableComponent implements OnChanges, AfterViewInit {
     return data.length > 0;
   }
 
-  exportCSV(dt: Table) {
-    const hasExclude = (this.exportExclude?.length ?? 0) > 0;
-    if (!hasExclude) { dt.exportCSV(); return; }
-
+  // ==== EXPORTACIÓN XLSX (SpreadsheetML 2003) ====
+  exportXLSX(dt: Table) {
     const data = (dt.filteredValue as any[] | null | undefined) ?? this.rows ?? [];
-    const cols = this.visibleColumns.filter(c => !this.exportExclude.includes(c.field));
-    if (!cols.length || !data.length) return;
+    const cols = this.visibleColumns;
 
-    const sep = this.csvSeparator || ',';
-    const lines: string[] = [];
-    lines.push(cols.map(c => this._csvEscape(c.header, sep)).join(sep));
+    // Respeta exportExclude
+    const colsToExport = cols.filter(c => !this.exportExclude.includes(c.field));
+    if (!colsToExport.length || !data.length) return;
+
+    const headers = colsToExport.map(c => c.header);
+    const matrix: string[][] = [headers];
+
     for (const r of data) {
-      const row = cols.map(c => this._csvEscape(this._getByPath(r, c.field), sep)).join(sep);
-      lines.push(row);
+      const row: string[] = [];
+      for (const c of colsToExport) {
+        row.push(this._displayValue(r, c));
+      }
+      matrix.push(row);
     }
 
-    const csv = '\uFEFF' + lines.join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = this._ensureExt(this.exportFilename, 'csv');
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
+    const filename = this._ensureExt(this.exportFilename, 'xls');
+    this._downloadXlsx(matrix, 'Datos', filename);
   }
 
   exportPDF(dt: Table) {
@@ -656,46 +654,76 @@ export class SmartTableComponent implements OnChanges, AfterViewInit {
   // Opciones únicas para filtros de lista
   distinctOptions(col: SmartTableColumn): Array<{ label: string; value: any }> {
     const field = col.filterField || col.field;
+
+    // Caso especial: cellType 'status' con statusMap → usar labels del map pero conservar el valor crudo
+    if (col.cellType === 'status' && col.cellArgs?.statusMap) {
+      const map = col.cellArgs.statusMap;
+      const present = new Set<string>();
+      for (const r of this._rowsInternal || []) {
+        const raw = this.getByPath(r, field);
+        if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+          present.add(String(raw));
+        }
+      }
+      const items = Array.from(present).map(k => {
+        const meta = map[k];
+        const label = meta?.label ?? k;
+        return { label, value: k }; // valor crudo para que filtre bien
+      });
+      items.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+      return items;
+    }
+
+    // Caso especial: booleanos (incluye 'booleanTag')
+    if (col.filterType === 'boolean' || col.cellType === 'boolean' || col.cellType === 'booleanTag') {
+      // Detectar la representación cruda dominante en los datos (string '1'/'0' o booleanos)
+      const present = new Set<any>();
+      for (const r of this._rowsInternal || []) {
+        const v = this.getByPath(r, field);
+        if (v !== undefined && v !== null && String(v).trim?.() !== '') {
+          present.add(v);
+        }
+      }
+
+      // Creamos pares (label, value) manteniendo el crudo
+      const opts: Array<{ label: string; value: any }> = [];
+      for (const v of present) {
+        const isTrue = v === true || v === 1 || v === '1' || v === 'true';
+        const label = isTrue ? 'Sí' : 'No';
+        // Evitar duplicados por distintas representaciones del mismo booleano
+        if (!opts.some(o => o.label === label)) {
+          // Usa como "value" la representación presente en datos (para que filtre)
+          // Preferimos la que existe en 'present' (si hay '1' y true, tomará la primera que vea)
+          opts.push({ label, value: v });
+        }
+      }
+
+      // Si no encontramos valores (tabla vacía), default
+      if (opts.length === 0) {
+        return [
+          { label: 'Sí', value: '1' },
+          { label: 'No', value: '0' },
+        ];
+      }
+
+      // Orden 'No' / 'Sí'
+      opts.sort((a, b) => a.label.localeCompare(b.label, 'es'));
+      return opts;
+    }
+
+    // Genérico
     const set = new Set<string>();
     const out: Array<{ label: string; value: any }> = [];
 
     for (const r of this._rowsInternal || []) {
-      let v = this.getByPath(r, field);
-
-      if (col.cellType === 'status' && col.cellArgs?.statusMap) {
-        const map = col.cellArgs.statusMap;
-        const present = new Set<string>();
-        for (const r of this._rowsInternal || []) {
-          const raw = this.getByPath(r, col.filterField || col.field);
-          if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
-            present.add(String(raw));
-          }
-        }
-        const out = Array.from(present).map(k => {
-          const meta = map[k];
-          const label = meta?.label ?? k;
-          return { label, value: k };
-        });
-        out.sort((a, b) => a.label.localeCompare(b.label, 'es'));
-        return out;
-      }
-
-      if (col.filterType === 'boolean') {
-        v = v === true || v === '1' || v === 1 || v === 'true';
-      }
-
+      const v = this.getByPath(r, field);
       if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) continue;
 
       const key = typeof v === 'object' ? JSON.stringify(v) : String(v);
       if (set.has(key)) continue;
       set.add(key);
 
-      const label =
-        col.filterType === 'boolean'
-          ? (v ? 'Sí' : 'No')
-          : String(this.getByPath(r, field) ?? v);
-
-      out.push({ label, value: v });
+      out.push({ label: String(v), value: v });
     }
 
     out.sort((a, b) => a.label.localeCompare(b.label, 'es'));
@@ -725,5 +753,120 @@ export class SmartTableComponent implements OnChanges, AfterViewInit {
       return `${Math.max(total, this.minScrollHeightPx)}px`;
     }
     return this.scrollHeight;
+  }
+
+  // === Helpers de export ===
+  private _displayValue(r: any, c: SmartTableColumn): string {
+    const raw = this._getByPath(r, c.field);
+
+    switch (c.cellType) {
+      case 'date': {
+        // La exportación aquí mantiene el ISO si existe, o string
+        const d = raw instanceof Date ? raw : new Date(raw ?? NaN);
+        if (!isNaN(d.getTime())) {
+          // Excel entiende fechas si se exporta como texto; para mantenerlo simple usamos dd/MM/yyyy HH:mm
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+        return raw != null ? String(raw) : '';
+      }
+
+      case 'boolean':
+        return (raw === true || raw === 1 || raw === '1' || raw === 'true') ? 'Sí' : 'No';
+
+      case 'booleanTag':
+        return (raw === true || raw === 1 || raw === '1' || raw === 'true') ? 'Sí' : 'No';
+
+      case 'status': {
+        const map = c.cellArgs?.statusMap;
+        if (map) {
+          const meta = map[raw] ?? c.cellArgs?.statusDefault ?? { label: raw ?? '' };
+          return meta.label ?? (raw != null ? String(raw) : '');
+        }
+        return raw != null ? String(raw) : '';
+      }
+
+      case 'imageBase64':
+        return raw ? '[Imagen]' : '';
+
+      default:
+        return raw != null ? String(raw) : '';
+    }
+  }
+
+  private _downloadXlsx(matrix: string[][], sheetName: string, filename: string) {
+    const xml = this._buildWorksheetXml(matrix, sheetName);
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename; // .xlsx (ver nota en el mensaje)
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+
+  /** SpreadsheetML 2003 */
+  private _buildWorksheetXml(matrix: string[][], sheetName: string): string {
+    const esc = (s: any) =>
+      String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // Determinar ancho de columnas simple (en “chars”)
+    const colCount = matrix[0]?.length ?? 0;
+    const colWidths = Array.from({ length: colCount }, (_, j) => {
+      let max = 8; // min
+      for (let i = 0; i < matrix.length; i++) {
+        const len = (matrix[i]?.[j] ?? '').length;
+        if (len > max) max = len;
+      }
+      return Math.min(Math.max(max + 2, 8), 60); // clamp
+    });
+
+    const rowsXml = matrix.map((row, idx) => {
+      const isHeader = idx === 0;
+      const cells = row.map(v => `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`).join('');
+      return `<Row${isHeader ? ' ss:StyleID="sHeader"' : ''}>${cells}</Row>`;
+    }).join('');
+
+    const colsXml = colWidths.map(w => `<Column ss:AutoFitWidth="0" ss:Width="${w * 6}"/>`).join('');
+
+    return `<?xml version="1.0"?>
+  <?mso-application progid="Excel.Sheet"?>
+  <Workbook
+    xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+    xmlns:o="urn:schemas-microsoft-com:office:office"
+    xmlns:x="urn:schemas-microsoft-com:office:excel"
+    xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+    xmlns:html="http://www.w3.org/TR/html40"
+  >
+    <Styles>
+      <Style ss:ID="sHeader">
+        <Font ss:Bold="1"/>
+        <Interior ss:Color="#FFFCAB" ss:Pattern="Solid"/>
+      </Style>
+    </Styles>
+    <Worksheet ss:Name="${esc(sheetName)}">
+      <Table>
+        ${colsXml}
+        ${rowsXml}
+      </Table>
+      <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+        <Selected/>
+        <ProtectObjects>False</ProtectObjects>
+        <ProtectScenarios>False</ProtectScenarios>
+      </WorksheetOptions>
+    </Worksheet>
+  </Workbook>`;
+  }
+
+  private _colLetter(n: number): string {
+    // 1 -> A, 26 -> Z, 27 -> AA ...
+    let s = '';
+    while (n > 0) {
+      const m = (n - 1) % 26;
+      s = String.fromCharCode(65 + m) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
   }
 }

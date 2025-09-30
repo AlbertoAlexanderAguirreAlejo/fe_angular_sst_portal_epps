@@ -12,6 +12,7 @@ import { ReportsStore } from '../data-access/reports.store';
 import { StorageService } from '@core/services/storage/storage.service';
 
 import { SmartTableComponent, SmartTableColumn } from '@shared/ui/components/smart-table/smart-table.component';
+import { SmartCellDef } from '@shared/ui/components/smart-table/smart-cell.directive';
 import { SmartAutocompleteComponent } from '@shared/ui/components/smart-autocomplete.component';
 import { SmartDateRangeComponent } from '@shared/ui/components/smart-date-range.component';
 import { SmartFilterBarComponent } from '@shared/ui/components/smart-filter-bar/smart-filter-bar.component';
@@ -23,9 +24,11 @@ import { toYYYYMMDD, isValidRange } from '@shared/utils/date/date.util';
   standalone: true,
   selector: 'app-requests-report',
   imports: [
-    CommonModule, FormsModule, DatePickerModule, ButtonModule, TagModule,
-    ToolbarModule, SmartTableComponent, SmartAutocompleteComponent,
-    SmartDateRangeComponent, SmartFilterBarComponent, FilterAdapterDirective
+    CommonModule, FormsModule,
+    DatePickerModule, ButtonModule, TagModule, ToolbarModule,
+    SmartTableComponent, SmartCellDef,            // <- AQUI IMPORTAS LA DIRECTIVA
+    SmartAutocompleteComponent, SmartDateRangeComponent,
+    SmartFilterBarComponent, FilterAdapterDirective
   ],
   template: `
     <div class="flex flex-col gap-5 h-dvh">
@@ -64,9 +67,27 @@ import { toYYYYMMDD, isValidRange } from '@shared/utils/date/date.util';
         rowKey="idSstSolicitudEppsEquipo"
         [stateKey]="'table:' + pageKey"
         [exportFilename]="pageName"
-        [exportExclude]="['firma']"
+        [exportExclude]="['actions']"
         [displayMode]="'expand'"
-      />
+      >
+        <!-- Columna Acciones (custom cell) -->
+        <ng-template smartCell="actions" let-row>
+          @if (row.flagEstado === '2') {
+            <button
+              pButton
+              type="button"
+              class="p-button-sm"
+              severity="danger"
+              icon="pi pi-ban"
+              label="Anular"
+              [disabled]="isBusy(row.idSstSolicitudEppsEquipo)"
+              (click)="onAnular(row)"
+            ></button>
+          } @else {
+            <span class="text-xs opacity-50">—</span>
+          }
+        </ng-template>
+      </app-smart-table>
     </div>
   `
 })
@@ -74,12 +95,11 @@ export class RequestsReportPage {
   pageName = 'Reporte de Solicitudes';
   pageKey = 'reports:requests';
 
-  // Inyecciones
   private store = inject(ReportsStore);
   private storage = inject(StorageService);
 
-  // Columnas
   cols: SmartTableColumn[] = [
+    { field: 'actions',                 header: 'Acciones',           cellType: 'text',       minWidthPx: 100, sortable: false, filterable: false, align: 'center' },
     { field: 'nroReservaSap',           header: 'Reserva',            cellType: 'text',       minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
     { field: 'docMaterialSap',          header: 'Material',           cellType: 'text',       minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
     { field: 'nroDoc',                  header: 'Doc.',               cellType: 'text',       minWidthPx: 100, sortable: true,  filterable: true, filterType: 'text',  align: 'center' },
@@ -99,7 +119,7 @@ export class RequestsReportPage {
           '5': { label: 'Rechazado',               severity: 'danger',    icon: 'pi pi-times-circle' },
         },
       }
-     },
+    },
     { field: 'flagPrimeraEntrega',      header: 'Primera entrega',    cellType: 'booleanTag', minWidthPx: 140, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect', align: 'center' },
     { field: 'flagPerdida',             header: 'Pérdida',            cellType: 'booleanTag', minWidthPx: 120, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect', align: 'center' },
     { field: 'fechaEntrega',            header: 'Fecha Entrega',      cellType: 'date',       minWidthPx: 140, sortable: true,  filterable: true, filterType: 'date' },
@@ -113,17 +133,16 @@ export class RequestsReportPage {
     { field: 'nombresEncargadoEntrega', header: 'Encargado Entrega',  cellType: 'text',       minWidthPx: 200, sortable: true,  filterable: true, filterType: 'text',  filterUI: 'multiselect' },
   ];
 
-  // Filtros
   dateRange = signal<Date[] | null>(null);
   selectedDocs: string[] = [];
 
-  // Datos
   today = new Date();
   allColabs = computed(() => this.store.listaTrabajadores());
   rows = computed(() => this.store.listaSolicitudes());
 
+  private busy = new Set<number>();
+
   constructor() {
-    // Rehidratación
     const saved = this.storage.get<{ dateRange?: string[]; docs?: string[] }>('filters:' + this.pageKey, {});
     if (saved.dateRange?.length === 2) {
       const parsed = saved.dateRange.map(s => new Date(s));
@@ -143,6 +162,36 @@ export class RequestsReportPage {
     const fini = toYYYYMMDD(d1);
     const ffin = toYYYYMMDD(d2);
     const docs = (f?.docs ?? []) as string[];
+    this.store.loadSolicitudes({ fini, ffin, nroDoc: docs });
+  }
+
+  isBusy(id: number): boolean {
+    return this.busy.has(Number(id));
+  }
+
+  async onAnular(row: any) {
+    const id = Number(row?.idSstSolicitudEppsEquipo);
+    if (!id || String(row?.flagEstado) !== '2') return;
+
+    const ok = window.confirm('¿Confirmas anular este registro?');
+    if (!ok) return;
+
+    try {
+      this.busy.add(id);
+      const done = await this.store.rechazarEquipo(id);
+      if (done) this.reloadCurrent();
+    } finally {
+      this.busy.delete(id);
+    }
+  }
+
+  private reloadCurrent() {
+    const dr = this.dateRange();
+    if (!dr || dr.length !== 2 || !isValidRange(dr)) return;
+    const [d1, d2] = dr;
+    const fini = toYYYYMMDD(d1);
+    const ffin = toYYYYMMDD(d2);
+    const docs = this.selectedDocs ?? [];
     this.store.loadSolicitudes({ fini, ffin, nroDoc: docs });
   }
 }

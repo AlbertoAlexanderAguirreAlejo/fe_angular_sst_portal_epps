@@ -53,12 +53,12 @@ import { GradientBorderDirective } from '@shared/ui/directives/gradient-border.d
               Cancelar todo
             </button>
             <button
-              class="px-2 py-1 rounded-lg text-xs transition border border-current/20 hover:bg-current/10"
+              class="px-2 py-1 rounded-lg text-xs transition border border-current/20 hover:bg-current/10 text-white dark:text-black bg-indigo-400"
               (click)="collapsed = !collapsed"
               [attr.aria-expanded]="!collapsed"
               [attr.aria-label]="collapsed ? 'Expandir' : 'Colapsar'"
             >
-              {{ collapsed ? 'Mostrar' : 'Ocultar' }}
+              {{ collapsed ? '+' : '-' }}
             </button>
           </div>
         </div>
