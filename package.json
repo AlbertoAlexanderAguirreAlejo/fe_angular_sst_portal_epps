@@ -7,9 +7,9 @@
     "prd": "ng serve --configuration production --port 5173",
     "build": "ng build --configuration production",
     "build:dev": "ng build --configuration development",
-    "build:prd": "npm run build",
+    "build:prd": "pnpm run build",
     "war": "node tools/pack-war.mjs",
-    "build:prd:war": "npm run build:prd && npm run war",
+    "build:prd:war": "pnpm run build:prd &npm run war",
     "postbuild": "node tools/obfuscate.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
